@@ -1,0 +1,90 @@
+--- nicstat.c	2012-06-27 12:32:22.773743000 -0400
++++ nicstat-1.90.2-noleak.c	2012-06-27 12:19:41.806919000 -0400
+@@ -15,7 +15,7 @@
+ 
+ #pragma ident	"@(#)nicstat.c	1.28	11/04/25"
+ 
+-#define	NICSTAT_VERSION		"1.90.1"
++#define	NICSTAT_VERSION		"1.90.2"
+ 
+ /* Is this GNU/Linux? */
+ #if defined(__linux__) || defined(__linux) || defined(linux)
+@@ -640,7 +640,7 @@
+ static if_list_t *
+ get_if_list_lifc()
+ {
+-	if_list_t *p, *newp;
++	if_list_t *p, *newp, *t;
+ 	struct lifnum if_num;		/* Includes # of if's */
+ 	struct lifconf if_conf;		/* Includes ptr to list of names */
+ 
+@@ -648,6 +648,19 @@
+ 	struct lifreq *if_reqp, req;
+ 	int lif_size, lif_count, i;
+ 
++  /* prevent memory leaks */ 
++  if (g_getif_list != NULL) {
++    p = g_getif_list;
++    while (p != NULL) {
++      t = p->next;
++      /* free memory pointed to by p->name, as it's allocated by new_string() */
++      realloc(p->name,0);
++      /* and then the entire data structure itself */
++      realloc(p,0);
++      p = t;
++    }
++  }
++
+ 	p = allocate(sizeof (if_list_t));
+ 	g_getif_list = p;
+ 
+@@ -752,8 +765,20 @@
+ get_if_list_dl()
+ {
+ 	uint32_t flags = DLADM_OPT_ACTIVE;
+-	struct if_list *p;
+-
++	struct if_list *p, *t;
++ 
++  /* prevent memory leaks */ 
++  if (g_getif_list != NULL) {
++    p = g_getif_list;
++    while (p != NULL) {
++      t = p->next;
++      /* free memory pointed to by p->name, as it's allocated by new_string() */
++      realloc(p->name,0);
++      /* and then the entire data structure itself */
++      realloc(p,0);
++      p = t;
++    }
++  }
+ 	p = allocate(sizeof (struct if_list));
+ 	/* Start with "lo0" unless it is ignored */
+ 	if (! g_nonlocal && (! if_is_ignored("lo0"))) {
+@@ -807,12 +832,25 @@
+ static if_list_t *
+ get_if_list_kstat()
+ {
+-	if_list_t *p, *newp;
++	if_list_t *p, *newp, *t;
+ 	kstat_t *ksp;
+ 	kstat_named_t *knp;
+ 	char ifname[MAXLINKNAMELEN];
+ 	char *namep;
+ 
++  /* prevent memory leaks */ 
++  if (g_getif_list != NULL) {
++    p = g_getif_list;
++    while (p != NULL) {
++      t = p->next;
++      /* free memory pointed to by p->name, as it's allocated by new_string() */
++      realloc(p->name,0);
++      /* and then the entire data structure itself */
++      realloc(p,0);
++      p = t;
++    }
++  }
++
+ 	p = allocate(sizeof (struct if_list));
+ 	/* Start with "lo0" unless it is ignored */
+ 	if (! g_nonlocal && (! if_is_ignored("lo0"))) {
