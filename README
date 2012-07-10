@@ -1,0 +1,4 @@
+To test for memory leaks (on Solaris), run nicstat with the following:
+
+LD_PRELOAD=libumem.so.1 UMEM_DEBUG=default UMEM_LOGGING=transaction ./nicstat 1
+
