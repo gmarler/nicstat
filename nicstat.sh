@@ -1,7 +1,7 @@
 #!/bin/sh
 # nicstat.sh -	Wrapper for multi-architecture nicstat install
 #
-# Tim Cook, 4 Apr 2011
+# Tim Cook, 27 Aug 2012
 
 # Let us see if we can figure out the OS & CPU architecture cheaply
 
@@ -23,6 +23,10 @@ if [ -f "/etc/release" ]; then
 	ostype=Solaris ; osrel=$f3 ; cputype=i386 ;;
     ' '[A-Z]*' Solaris '[0-9]*' '*' SPARC' )
 	ostype=Solaris ; osrel=$f3 ; cputype=sparc ;;
+    ' '[A-Z]*' Solaris '[0-9]*.[0-9]*' X86' )
+	ostype=Solaris ; rel=$f3 ; cputype=i386 ;;
+    ' '[A-Z]*' Solaris '[0-9]*.[0-9]*' SPARC' )
+	ostype=Solaris ; rel=$f3 ; cputype=sparc ;;
     *' Solaris '* )
 	ostype=Solaris
 	cpu=`uname -p`
@@ -30,13 +34,13 @@ if [ -f "/etc/release" ]; then
 	'i386' | 'sparc' )	cputype=$cpu ;;
 	esac
 	rel=`uname -r`
-	case "$rel" in
-	5.8 )			osrel=8 ;;
-	5.9 )			osrel=9 ;;
-	5.10 )			osrel=10 ;;
-	5.11 )			osrel=11 ;;
-	esac
 	;;
+    esac
+    case "$rel" in
+    5.8 )			osrel=8 ;;
+    5.9 )			osrel=9 ;;
+    5.10 )			osrel=10 ;;
+    5.11 | 11.* )		osrel=11 ;;
     esac
 elif [ -f "$OSTYPE_PATH" -a ! -s "$OSTYPE_PATH" ]; then
     read f1 rest < "$OSTYPE_PATH"
@@ -109,6 +113,7 @@ if [ "X$cputype" = "Xunknown" ]; then
     'i'[3456]'86 '* )		cputype=i386 ;;
     'i86pc '* )			cputype=i386 ;;
     *' sparc' )			cputype=sparc ;;
+    'x86_64 '* )		cputype=i386 ;;
     esac
 fi
 

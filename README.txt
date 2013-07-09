@@ -1,4 +1,4 @@
-nicstat 1.90 README
+nicstat 1.92 README
 ===================
 
 nicstat is licensed under the Artistic License 2.0.  You can find a

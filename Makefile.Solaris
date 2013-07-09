@@ -7,8 +7,9 @@ SOURCES =	nicstat.c
 BINARY =	nicstat
 BINARIES =	$(BINARY)
 
-#COPT =		-g -xO3
-COPT =		-g
+COPT =		-g -xO3
+COPT =		-g -O
+#COPT =		-g
 
 # _REENTRANT gets us the declaration of strtok_r() on Solaris 9
 CFLAGS =	$(COPT) -D_REENTRANT `./dladm.sh def`

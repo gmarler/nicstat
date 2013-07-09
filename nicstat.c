@@ -1,16 +1,14 @@
 /*
  * nicstat - print network traffic, Kb/s read and written.
  *
- * Copyright (c) 2005-2011, Brendan.Gregg@sun.com and Tim.Cook@sun.com
+ * Copyright (c) 2005-2012, Brendan.Gregg@sun.com and Tim.Cook@sun.com
  *
  * nicstat is licensed under the Artistic License 2.0.  You can find
  * a copy of this license as LICENSE.txt included with the nicstat
  * distribution, or at http://www.perlfoundation.org/artistic_license_2_0
  */
 
-#pragma ident	"@(#)nicstat.c	1.28	11/04/25"
-
-#define	NICSTAT_VERSION		"1.90"
+#define	NICSTAT_VERSION		"1.92"
 
 /* Is this GNU/Linux? */
 #if defined(__linux__) || defined(__linux) || defined(linux)
@@ -57,6 +55,9 @@
 #include <libdllink.h>
 #include <dlfcn.h>
 #include <link.h>
+#ifdef HAVE_LIBNETCFG
+#include <libnetcfg.h>
+#endif
 #endif
 #ifndef LIFC_ALLZONES	/* Comes from <net/if.h> in 5.10 & later */
 #define	LIFC_ALLZONES	0x08
@@ -117,9 +118,9 @@ typedef uint32_t		duplex_t;
 #define	LOOP_MAX 1
 
 #ifdef OS_LINUX
-#define	GETOPT_OPTIONS		"hi:sS:znplvxtua"
+#define	GETOPT_OPTIONS		"hi:sS:znplvxtuaMm"
 #else
-#define	GETOPT_OPTIONS		"hi:sznpklvxtua"
+#define	GETOPT_OPTIONS		"hi:sznpklvxtuaMm"
 #endif
 
 /*
@@ -283,6 +284,7 @@ static char **g_tracked;		/* tracked interfaces */
 static int g_line;			/* output line counter */
 static char *g_progname;			/* ptr to argv[0] */
 static int g_caught_cont;		/* caught SIGCONT - were suspended */
+static int g_opt_m;			/* show results in Mbps (megabits) */
 
 static int g_sock;			/* Socket for interface ioctl's */
 
@@ -361,6 +363,7 @@ usage(void)
 	    "         -u                 # show UDP statistics\n"
 	    "         -a                 # equivalent to \"-x -u -t\"\n"
 	    "         -l                 # list interface(s)\n"
+	    "         -M                 # output in Mbits/sec\n"
 #ifdef OS_LINUX
 	    "         -S int:mbps[fd|hd] # tell nicstat the interface\n"
 	    "                            # speed (Mbits/sec) and duplex\n"
@@ -630,12 +633,12 @@ fetch_boot_time()
 #endif /* OS_LINUX */
 
 #ifdef OS_SOLARIS
-static if_list_t *g_getif_list;		/* Used by the lifc & dladm routines */
+static if_list_t *g_getif_list = NULL;	/* Used by the lifc & dladm routines */
 
 static if_list_t *
-get_if_list_lifc()
+get_if_list_lifc(if_list_t *p)
 {
-	if_list_t *p, *newp;
+	if_list_t *newp, *headp;
 	struct lifnum if_num;		/* Includes # of if's */
 	struct lifconf if_conf;		/* Includes ptr to list of names */
 
@@ -643,8 +646,7 @@ get_if_list_lifc()
 	struct lifreq *if_reqp, req;
 	int lif_size, lif_count, i;
 
-	p = allocate(sizeof (if_list_t));
-	g_getif_list = p;
+	headp = p;
 
 	/* Get number of interfaces on system */
 	if_num.lifn_family = AF_UNSPEC;
@@ -696,7 +698,7 @@ get_if_list_lifc()
 		}
 		p->name = new_string(if_reqp->lifr_name);
 	}
-	return (g_getif_list);
+	return (headp);
 }
 #endif	/* OS_SOLARIS */
 
@@ -744,18 +746,17 @@ dladm_callback(dladm_handle_t dh, datalink_id_t linkid, void *arg)
  * Get the current list of interfaces
  */
 static struct if_list *
-get_if_list_dl()
+get_if_list_dl(if_list_t *p)
 {
 	uint32_t flags = DLADM_OPT_ACTIVE;
-	struct if_list *p;
 
-	p = allocate(sizeof (struct if_list));
 	/* Start with "lo0" unless it is ignored */
 	if (! g_nonlocal && (! if_is_ignored("lo0"))) {
 		p->name = new_string("lo0");
 		p->next = (struct if_list *)NULL;
 	}
 
+	/* dladm_callback() will append entries to g_getif_list */
 	g_getif_list = p;
 	(void) dladm_walk_datalink_id(dladm_callback, g_handle,
 	    NULL, DATALINK_CLASS_ALL, DATALINK_ANY_MEDIATYPE,
@@ -764,24 +765,6 @@ get_if_list_dl()
 	return (g_getif_list = p);
 }
 #endif	/* USE_DLADM */
-
-#ifdef USE_DLADM
-static if_list_t *
-get_if_list()
-{
-	if (g_use_dladm)
-		return (get_if_list_dl());
-	return (get_if_list_lifc());
-}
-#else
-#ifdef OS_SOLARIS
-static inline if_list_t *
-get_if_list()
-{
-	return (get_if_list_lifc());
-}
-#endif /* OS_SOLARIS */
-#endif /* USE_DLADM */
 
 #ifdef OS_SOLARIS
 /*
@@ -800,22 +783,21 @@ get_if_list()
  * get_if_list_lifc(); and where USE_DLADM is not available.
  */
 static if_list_t *
-get_if_list_kstat()
+get_if_list_kstat(if_list_t *p)
 {
-	if_list_t *p, *newp;
+	if_list_t *newp, *headp;
 	kstat_t *ksp;
 	kstat_named_t *knp;
 	char ifname[MAXLINKNAMELEN];
 	char *namep;
 
-	p = allocate(sizeof (struct if_list));
+	headp = p;
+
 	/* Start with "lo0" unless it is ignored */
 	if (! g_nonlocal && (! if_is_ignored("lo0"))) {
 		p->name = new_string("lo0");
 		p->next = (struct if_list *)NULL;
 	}
-
-	g_getif_list = p;
 
 	for (ksp = g_kc->kc_chain; ksp != NULL; ksp = ksp->ks_next) {
 		if (ksp->ks_type != KSTAT_TYPE_NAMED)
@@ -863,7 +845,38 @@ get_if_list_kstat()
 		}
 		p->name = new_string(namep);
 	}
-	return (g_getif_list);
+	return (headp);
+}
+#endif /* OS_SOLARIS */
+
+#ifdef OS_SOLARIS
+static if_list_t *
+get_if_list()
+{
+	/* Free g_getif_list if needed */
+	if (g_getif_list) {
+		struct if_list *p, *next;
+
+		p = g_getif_list;
+		while (p) {
+			if (p->name)
+				free(p->name);
+			next = p->next;
+			free(p);
+			p = next;
+		}
+	}
+
+	/* Allocate new g_getif_list */
+	g_getif_list = allocate(sizeof (if_list_t));
+
+	if (g_opt_k)
+		return (get_if_list_kstat(g_getif_list));
+#ifdef USE_DLADM
+	if (g_use_dladm)
+		return (get_if_list_dl(g_getif_list));
+#endif
+	return (get_if_list_lifc(g_getif_list));
 }
 #endif /* OS_SOLARIS */
 
@@ -958,7 +971,7 @@ discover_kstats(char *if_name, nicdata_t *nic)
 
 		/* We have [link:::], [<drv>:<instance>::] or [<ifname>:::] */
 
-		kstat_read(g_kc, ksp, NULL);
+		(void) kstat_read(g_kc, ksp, NULL);
 		knp = KSTAT_NAMED_PTR(ksp);
 		for (n = 0; n < ksp->ks_ndata; n++, knp++) {
 			ks_link_state = B_FALSE;
@@ -1026,7 +1039,7 @@ discover_kstats(char *if_name, nicdata_t *nic)
 
 		set_op_kstat:
 			if (ttype > nic->op_types) {
-				nic->op_ksp =  ksp;
+				nic->op_ksp = ksp;
 				nic->flags |= NIC_OK_UPDATED;
 			}
 			nic->op_types |= ttype;
@@ -1129,10 +1142,7 @@ update_nicdata_list()
 	LIFR_FLAGS_TYPE if_flags;
 	uint32_t new_nics;
 
-	if (g_opt_k)
-		if_listp = get_if_list_kstat();
-	else
-		if_listp = get_if_list();
+	if_listp = get_if_list();
 
 	new_headp = NULL;
 	new_tailp = NULL;
@@ -1803,7 +1813,7 @@ print_tcp()
 	update_timestr(&(g_tcp_new->tv.tv_sec));
 	if (! g_opt_p)
 		(void) printf("%8s %7s %7s %7s %7s %5s %5s %4s %5s %5s %5s\n",
-			g_timestr,  "InKB", "OutKB", "InSeg", "OutSeg",
+			g_timestr, "InKB", "OutKB", "InSeg", "OutSeg",
 			"Reset", "AttF", "%ReTX", "InConn", "OutCon", "Drops");
 
 	resets = (TCPSTAT(estabResets) + TCPSTAT(outRsts));
@@ -1925,21 +1935,37 @@ print_header(void)
 #endif
 	switch (g_style) {
 	case STYLE_SUMMARY:
-		(void) printf("%8s %8s %14s %14s\n",
-			"Time", "Int", "rKB/s", "wKB/s");
+		if (g_opt_m)
+			(void) printf("%8s %8s %14s %14s\n",
+			    "Time", "Int", "rMbps", "wMbps");
+		else
+			(void) printf("%8s %8s %14s %14s\n",
+			    "Time", "Int", "rKB/s", "wKB/s");
 		break;
 	case STYLE_FULL:
-		(void) printf(
-			"%8s %8s %7s %7s %7s %7s %7s %7s %5s %6s\n",
-			"Time", "Int", "rKB/s", "wKB/s", "rPk/s",
-			"wPk/s", "rAvs", "wAvs", "%Util", "Sat");
+		if (g_opt_m)
+			(void) printf("%8s %8s %7s %7s %7s "
+			    "%7s %7s %7s %5s %6s\n",
+			    "Time", "Int", "rMbps", "wMbps", "rPk/s",
+			    "wPk/s", "rAvs", "wAvs", "%Util", "Sat");
+		else
+			(void) printf("%8s %8s %7s %7s %7s "
+			    "%7s %7s %7s %5s %6s\n",
+			    "Time", "Int", "rKB/s", "wKB/s", "rPk/s",
+			    "wPk/s", "rAvs", "wAvs", "%Util", "Sat");
 		break;
 	case STYLE_EXTENDED:
 		update_timestr(NULL);
-		(void) printf(
-			"%-10s %7s %7s %7s %7s  %5s %5s %5s %5s %5s  %5s\n",
-			g_timestr, "RdKB", "WrKB", "RdPkt", "WrPkt", "IErr",
-			"OErr", "Coll", "NoCP", "Defer", "%Util");
+		if (g_opt_m)
+			(void) printf("%-10s %7s %7s %7s %7s  "
+			    "%5s %5s %5s %5s %5s  %5s\n",
+			    g_timestr, "RdMbps", "WrMbps", "RdPkt", "WrPkt",
+			    "IErr", "OErr", "Coll", "NoCP", "Defer", "%Util");
+		else
+			(void) printf("%-10s %7s %7s %7s %7s  "
+			    "%5s %5s %5s %5s %5s  %5s\n",
+			    g_timestr, "RdKB", "WrKB", "RdPkt", "WrPkt",
+			    "IErr", "OErr", "Coll", "NoCP", "Defer", "%Util");
 		break;
 	}
 }
@@ -2012,15 +2038,14 @@ print_stats()
 		wbps = (nicp->new.wbytes - nicp->old.wbytes) / tdiff;
 		rpps = (nicp->new.rpackets - nicp->old.rpackets) / tdiff;
 		wpps = (nicp->new.wpackets - nicp->old.wpackets) / tdiff;
-		switch (g_style) {
-		case STYLE_EXTENDED:
+		if (g_style == STYLE_EXTENDED ||
+		    g_style == STYLE_EXTENDED_PARSEABLE) {
 			ierrs = (nicp->new.ierr - nicp->old.ierr) / tdiff;
 			oerrs = (nicp->new.oerr - nicp->old.oerr) / tdiff;
 			colls = (nicp->new.coll - nicp->old.coll) / tdiff;
 			nocps = (nicp->new.nocp - nicp->old.nocp) / tdiff;
 			defers = (nicp->new.defer - nicp->old.defer) / tdiff;
-			break;
-		case STYLE_FULL:
+		} else if (g_style == STYLE_FULL) {
 			if (rpps > 0)
 				ravs = rbps / rpps;
 			else
@@ -2029,12 +2054,20 @@ print_stats()
 				wavs = wbps / wpps;
 			else
 				wavs = 0;
-		default:
-			/* SUMMARY, PARSEABLE */
-			sats = (nicp->new.sat - nicp->old.sat) / tdiff;
 		}
-		rkps = rbps / 1024;
-		wkps = wbps / 1024;
+		if (g_style == STYLE_FULL ||
+		    g_style == STYLE_PARSEABLE ||
+		    g_style == STYLE_EXTENDED_PARSEABLE)
+			sats = (nicp->new.sat - nicp->old.sat) / tdiff;
+		if (g_opt_m) {
+			/* report in Mbps */
+			rkps = rbps / 1024 / 128;
+			wkps = wbps / 1024 / 128;
+		} else {
+			/* original KB/sec */
+			rkps = rbps / 1024;
+			wkps = wbps / 1024;
+		}
 
 		/* Calculate utilisation */
 		if (nicp->speed > 0) {
@@ -2119,7 +2152,7 @@ print_stats()
 			 * for backward compatibility
 			 */
 			(void) printf("%ld:%s:%.*f:%.*f:%.*f:%.*f:"
-				"%.*f:%.*f:%.*f:%.*f:%.*f:%.*f:%.*f:%.*f\n",
+				"%.*f:%.*f:%.*f:%.*f:%.*f:%.*f:%.*f\n",
 				nicp->new.tv.tv_sec, nicp->name,
 				precision_p(rkps), rkps,
 				precision_p(wkps), wkps,
@@ -2131,8 +2164,7 @@ print_stats()
 				precision(oerrs), oerrs,
 				precision(colls), colls,
 				precision(nocps), nocps,
-				precision(defers), defers,
-				precision(util), util);
+				precision(defers), defers);
 		}
 
 		/* Save the current values for next time */
@@ -2430,7 +2462,13 @@ init_dladm()
 	}
 	g_use_dladm = B_TRUE;
 	/* Get a handle to use for libdladm call(s) */
-	if ((dlstat = dladm_open(&g_handle)) != DLADM_STATUS_OK) {
+	/* NOTE: This changed in S11.1 */
+#ifdef NETADM_ACTIVE_PROFILE
+	dlstat = dladm_open(&g_handle, NULL);
+#else
+	dlstat = dladm_open(&g_handle);
+#endif
+	if (dlstat != DLADM_STATUS_OK) {
 		char errmsg[DLADM_STRSIZE];
 
 		die(0, "could not open /dev/dld: %s",
@@ -2481,6 +2519,7 @@ main(int argc, char **argv)
 	g_someif = B_FALSE;
 	g_forever = B_FALSE;
 	g_caught_cont = B_FALSE;
+	g_opt_m = B_FALSE;
 #ifdef OS_SOLARIS
 	g_list = B_FALSE;
 	g_verbose = B_FALSE;
@@ -2524,13 +2563,17 @@ main(int argc, char **argv)
 			if (g_style == STYLE_FULL)
 				g_style = STYLE_NONE;
 			break;
-		case 'x' :
+		case 'x':
 			g_opt_x = B_TRUE;
 			break;
 		case 'a':
 			g_tcp = g_udp = B_TRUE;
 			if (g_style == STYLE_FULL)
 				g_opt_x = B_TRUE;
+			break;
+		case 'M':
+		case 'm':	/* Undocumented */
+			g_opt_m = B_TRUE;
 			break;
 		case 'p':
 			g_opt_p = B_TRUE;
@@ -2558,6 +2601,8 @@ main(int argc, char **argv)
 			g_style = STYLE_EXTENDED_PARSEABLE;
 		else if (! g_tcp && ! g_udp)
 			g_style = STYLE_PARSEABLE;
+		/* Always output KB in the parseable format */
+		g_opt_m = B_FALSE;
 	} else
 		if (g_opt_x)
 			g_style = STYLE_EXTENDED;

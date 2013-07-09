@@ -18,7 +18,7 @@ nicstat, enicstat \- print network traffic statistics
 .\" ========================================================================
 .SH SYNOPSIS
 .B nicstat
-[-hvnsxpztual]
+[-hvnsxpztualkM]
 .RI [-i interface]
 .RI [-S int:mbps[fd|hd]]
 .I [interval
@@ -54,6 +54,14 @@ transmitted (written).
 .B \-x
 Display extended output.  See \fBOUTPUT\fR section for details.
 .TP 1i
+.B \-M
+Display interface throughput statistics in Mbps (megabits per second),
+instead of the default KB/s (kilobytes per second).
+
+NOTE - interface statistics are reported to operating systems in bytes.
+nicstat does not know if Ethernet or other hardware overheads are
+included in the statistic on each platform.
+.TP 1i
 .B \-p
 Display output in parseable format.  This outputs one line per
 interface, in the following formats (which correspond to the
@@ -61,14 +69,17 @@ default, -x, -t and -u options; respectively):
 .TP 1i
 .PP
 .I time:In:rKB/s:wKB/s:rPk/s:wPk/s:%Util:Sat
-.I time:RdKB:WrKB:RdPkt:WrPkt:IErr:OErr:Coll:NoCP:Defer:%Util
+.I time:In:rKB/s:wKB/s:rPk/s:wPk/s:%Util:Sat:IErr:OErr:Coll:NoCP:Defer
 .I time:\fRTCP\fI:InKB:OutKB:InSeg:OutSeg:Reset:AttF:%ReTX:InConn:OutCon:Drops
 .I time:\fRUDP\fI:InDG:OutDG:InErr:OutErr
-.TP 2i
-.PP
+.TP 1i
+.B \ 
 where \fItime\fR is the number of seconds since midnight,
 Jan 1 1970 (UST) and the other fields are as described in the
 \fBOUTPUT\fR section below.
+
+NOTE - throughput statistics are always in KB/s (kilbytes per second)
+for parseable formats, even if the "-M" flag has been specified.
 .TP 1i
 .B \-z
 Skip interfaces for which there was zero traffic for the sample period.
@@ -104,7 +115,8 @@ Search for active network interfaces by looking for kstat "link_state"
 statistics with a value of 1.  This is only of value on systems
 running Solaris 10 (or early releases of Solaris 11 Express), with
 Exclusive IP Zones, where the interfaces given to an Exclusive IP Zone
-are not otherwise visible.
+are not otherwise visible.  If you are running Solaris 9 (or earlier),
+or Solaris 11 (or later) you do not need this option.
 .\" ========================================================================
 
 .SH OPERANDS
@@ -139,6 +151,12 @@ Kilobytes/second read (received).
 .TP 1i
 .B wKB/s, OutKB
 Kilobytes/second written (transmitted).
+.TP 1i
+.B rMbps, RdMbps
+Megabits/second read (received).
+.TP 1i
+.B wMbps, WrMbps
+Megabits/second written (transmitted).
 .TP 1i
 .B rPk/s, InSeg, InDG
 Packets (TCP Segments, UDP Datagrams)/second read (received).
@@ -274,7 +292,7 @@ Print statistics for non-local interfaces, setting speed of "eth0" and
 .BR ethtool (8)
 
 "nicstat - the Solaris and Linux Network Monitoring Tool You Did Not Know You Needed"
-.RI - http://blogs.sun.com/timc/entry/nicstat_the_solaris_and_linux
+.RI - http://blogs.oracle.com/timc/entry/nicstat_the_solaris_and_linux
 .\" ========================================================================
 .SH NOTES
 .PP

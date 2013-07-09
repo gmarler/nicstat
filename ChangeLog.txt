@@ -1,3 +1,29 @@
+Version 1.92
+October 2012
+
+  Common
+
+      - Added "-M" option to change throughput statistics to Mbps
+        (Megabits per second).  Suggestion from Darren Todd.
+
+      - Fixed bugs with printing extended parseable format (-xp)
+
+      - Fixed man page's description of extended parseable output.
+
+  Solaris
+
+      - Fixed memory leak associated with g_getif_list
+
+      - Add 2nd argument to dladm_open() for Solaris 11.1
+
+      - Modify nicstat.sh to handle Solaris 11.1
+
+   Linux
+
+      - Modify nicstat.sh to see "x86_64" cputype as "i386".  All Linux
+	binaries are built as 32-bit, so we do not need to
+	differentiate these two cpu types.
+
 Version 1.90
 April 2011
 
